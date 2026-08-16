@@ -133,117 +133,12 @@ function deselectCommand() {
 /** 選択範囲から作業用パスを作るときの許容値 (px) */
 const WORK_PATH_TOLERANCE = 1.0;
 
-function makeWorkPathCommand() {
-  return {
-    _obj: "make",
-    _target: [{ _ref: "path" }],
-    from: { _ref: "selectionClass", _property: "selection" },
-    tolerance: { _unit: "pixelsUnit", _value: WORK_PATH_TOLERANCE },
-    _options: NO_DIALOG,
-  };
-}
-
 /**
- * 「パスの境界線を描く」。ツールに設定されている現在のブラシ（サイズ・硬さ・
- * ブラシ先端）がそのまま使われる。
+ * 境界線を描く。実処理は ExtendScript 側 (extendscript.js) にある。
  *
- * using の列挙値は Photoshop の内部ツール ID。ブラシツールの ID は
- * "brushTool" ではなく "paintbrushTool"（charID の "PbTl"）。
- * バージョン差を考慮して候補を順に試し、通ったものを記憶する。
- */
-const STROKE_TOOLS = {
-  fill: ["paintbrushTool", "brushTool", "pencilTool"],
-  delete: ["eraserTool"],
-};
-const strokeToolCache = {};
-
-function strokePathCommand(toolValue) {
-  return {
-    _obj: "stroke",
-    _target: [{ _ref: "path", _enum: "ordinal", _value: "targetEnum" }],
-    using: { _enum: "penTool", _value: toolValue },
-    _options: NO_DIALOG,
-  };
-}
-
-/** 作業用パスの境界線を描く (batchPlay 版)。使えるツール ID を探して記憶する。 */
-async function strokeWorkPathViaBatchPlay(mode) {
-  const cached = strokeToolCache[mode];
-  const candidates = cached ? [cached] : STROKE_TOOLS[mode] || [];
-  let lastError = null;
-  for (let i = 0; i < candidates.length; i++) {
-    try {
-      await play("境界線の描画", strokePathCommand(candidates[i]));
-      strokeToolCache[mode] = candidates[i];
-      return;
-    } catch (e) {
-      lastError = e;
-    }
-  }
-  delete strokeToolCache[mode];
-  throw lastError || new Error("境界線の描画 / 使用できるツールがありません");
-}
-
-/**
- * 作業用パスの削除。
- * 現在のパス (targetEnum) を指す列挙参照が正しい形式。
- * `{_ref:"path", _property:"workPath"}` はパスを「選択」するための参照であり、
- * delete に渡すと「プログラムエラーです」になる。
- * 念のため他の形式もフォールバックとして用意し、通ったものを記憶する。
- */
-const DELETE_PATH_TARGETS = [
-  [{ _ref: "path", _enum: "ordinal", _value: "targetEnum" }],
-  [{ _ref: "path" }],
-];
-let deletePathTargetIndex = -1;
-let deletePathBroken = false;
-
-/**
- * 作業用パスから選択範囲を作り直す (batchPlay 版フォールバック用)。
- * こちらは元の投げ縄の形しか復元できず、ブラシが塗った範囲との合成は行わない。
- */
-function selectionFromWorkPathCommand() {
-  return {
-    _obj: "set",
-    _target: [{ _ref: "channel", _property: "selection" }],
-    to: { _ref: "path", _enum: "ordinal", _value: "targetEnum" },
-    antiAlias: true,
-    _options: NO_DIALOG,
-  };
-}
-
-function deleteWorkPathCommand(target) {
-  return { _obj: "delete", _target: target, _options: NO_DIALOG };
-}
-
-/** 作業用パスを消す。全ての形式が失敗したら以後は試行しない（毎回エラーダイアログが出るのを防ぐ） */
-async function removeWorkPath() {
-  if (deletePathBroken) return;
-  const indexes =
-    deletePathTargetIndex >= 0
-      ? [deletePathTargetIndex]
-      : DELETE_PATH_TARGETS.map((_, i) => i);
-  let lastError = null;
-  for (let i = 0; i < indexes.length; i++) {
-    try {
-      await play("作業用パスの削除", deleteWorkPathCommand(DELETE_PATH_TARGETS[indexes[i]]));
-      deletePathTargetIndex = indexes[i];
-      return;
-    } catch (e) {
-      lastError = e;
-    }
-  }
-  deletePathTargetIndex = -1;
-  deletePathBroken = true;
-  throw lastError || new Error("作業用パスの削除: 不明なエラー");
-}
-
-/**
- * 境界線を描く。
- *
- * ExtendScript を優先する。batchPlay の `stroke` はモーダルスコープ内から呼ぶと
- * `{_obj:"error", message:"", result:-128}`（ユーザーがキャンセル）で拒否される
- * 環境があるため。ExtendScript の PathItem.strokePath() にはその制約が無い。
+ * batchPlay の {_obj:"stroke"} は executeAsModal のスコープ内から呼ぶと
+ * {_obj:"error", message:"", result:-128}（ユーザーがキャンセル）で拒否されるため、
+ * batchPlay では実装できない。
  *
  * measureOnly が true なら実際には描かず、
  * 「元の選択範囲 ∪ ブラシが塗るはずの範囲」を選択状態にして返す。
@@ -253,31 +148,21 @@ async function drawBorder(mode, measureOnly) {
   const toolType = mode === "fill" ? "BRUSH" : "ERASER";
   const keep = !!measureOnly;
 
-  if (es.isAvailable() !== false) {
-    const result = await es.strokeSelectionBorder(
-      toolType,
-      WORK_PATH_TOLERANCE,
-      keep
-    );
-    if (result === "ok") return { deselected: !keep };
-    if (result !== null) {
-      // ExtendScript は動いたが Photoshop 側の処理で失敗した
-      const err = new Error("境界線の描画 / " + result);
-      err.step = "境界線の描画";
-      console.error("[lassoDraw] 境界線の描画 (ExtendScript)", result);
-      throw err;
-    }
-    // result === null: ブリッジ自体が使えないので batchPlay へフォールバック
-  }
+  const result = await es.strokeSelectionBorder(
+    toolType,
+    WORK_PATH_TOLERANCE,
+    keep
+  );
+  if (result === "ok") return { deselected: !keep };
 
-  await play("作業用パスの作成", makeWorkPathCommand());
-  await play("選択解除", deselectCommand());
-  await strokeWorkPathViaBatchPlay(mode);
-  if (keep) {
-    await play("選択範囲の復元", selectionFromWorkPathCommand());
-  }
-  await removeWorkPath();
-  return { deselected: !keep };
+  const detail =
+    result === null
+      ? "ExtendScript が使えません（" + (es.getLastError() || "原因不明") + "）"
+      : result;
+  const err = new Error("境界線の描画 / " + detail);
+  err.step = "境界線の描画";
+  console.error("[lassoDraw] 境界線の描画", detail);
+  throw err;
 }
 
 /**
@@ -525,7 +410,6 @@ function stringValue(value) {
  * javaScriptName ではなくファイルパスで指定するので、ここでは弾かれる。
  */
 function onScriptEvent(eventName, descriptor) {
-  console.log("[lassoDraw] script event", descriptor);
   if (!descriptor) return;
   // 自分が発行したファイル指定の実行は対象外
   if (descriptor.javascript || descriptor.javaScript) return;

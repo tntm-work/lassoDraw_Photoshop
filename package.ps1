@@ -38,6 +38,7 @@ $include = @(
     'main.js',
     'extendscript.js',
     'README.md',
+    'README.ja.md',
     'icons/icon.png',
     'icons/icon@2x.png',
     'scripts/lassoDraw Toggle.jsx'

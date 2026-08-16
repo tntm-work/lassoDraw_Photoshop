@@ -1,283 +1,234 @@
-﻿# lassoDraw (Photoshop UXP プラグイン)
+# lassoDraw
 
-投げ縄ツールで選択範囲を作った瞬間に、その範囲を **塗りつぶして選択解除** します。
-Ctrl を押しながら確定した場合は **範囲内を削除して選択解除** します。
+**English** | [日本語](README.ja.md)
 
-## 動作
+A Photoshop UXP plugin that fills a lasso selection the moment you finish drawing it,
+then deselects. Hold **Ctrl** while releasing the mouse and it erases instead.
 
-| 操作 | 動作 |
+Draw shape → it is painted. No `Alt+Backspace`, no `Ctrl+D`.
+
+---
+
+## Features
+
+- **Auto-fill** — every new lasso selection is filled with the foreground color and deselected
+- **Ctrl to erase** — hold Ctrl (Cmd on macOS) as you finish the lasso to clear the area instead
+- **Brush outline** — optionally stroke the selection border with your *current brush*
+  (size, hardness, tip shape, scattering — all of it)
+- **Selection-only mode** — skip painting and keep the selection, optionally grown by
+  the exact area the brush would have covered
+- **Toggle by keyboard shortcut** — via a bundled Photoshop script
+- **Locked-layer aware** — skips operations Photoshop would refuse, so no dialogs interrupt you
+
+## Requirements
+
+- Photoshop 24.0 or later (UXP `manifestVersion` 5)
+- ExtendScript enabled — still the case as of Photoshop 2026. It is used for modifier-key
+  detection and for stroking the border; see [How it works](#how-it-works).
+  Without it, the plugin still runs using the fallback detection mode.
+
+> Developed and tested on Windows. macOS should work but is untested.
+
+## Install
+
+### From a package
+
+1. Download `com.lassodraw.photoshop_PS.ccx` from the [Releases](../../releases) page
+2. Double-click it. The Creative Cloud desktop app installs the plugin.
+3. In Photoshop: **Plugins > lassoDraw**
+
+### From source
+
+1. Install the [UXP Developer Tool](https://developer.adobe.com/photoshop/uxp/2022/guides/devtool/)
+2. `Add Plugin...` → select this repository's `manifest.json`
+3. With Photoshop running, click `Load`
+
+## Usage
+
+Pick a lasso tool and draw. That is the whole interaction.
+
+| Action | Result |
 | --- | --- |
-| 投げ縄でドラッグ → マウスを離す | 描画色で塗りつぶし → 選択解除 |
-| 投げ縄でドラッグ → **Ctrl を押しながら**マウスを離す | 範囲内を削除 → 選択解除 |
+| Lasso drag → release | Fill with foreground color → deselect |
+| Lasso drag → **hold Ctrl** → release | Clear the area → deselect |
 
-「削除」は Photoshop の Edit > Clear 相当です。通常レイヤーでは透明になり、
-ロックされた背景レイヤーでは背景色で塗られます。
+"Clear" is `Edit > Clear`: transparent on a normal layer, background color on a locked
+Background layer.
 
-> **Windows での注意**
-> 投げ縄ツールでは *ドラッグ開始時* に Ctrl を押していると移動ツールに切り替わります。
-> ドラッグを始めてから、マウスを離す直前に Ctrl を押してください。
+> **Windows note**
+> Holding Ctrl *before* starting the drag switches Photoshop to the Move tool.
+> Start the drag first, then press Ctrl just before releasing the mouse.
 
-## ExtendScript ブリッジ
+### Panel options
 
-UXP 単体ではできないことが 2 つあり、どちらも ExtendScript 経由で解決しています。
+| Option | Description |
+| --- | --- |
+| **有効 / Enabled** | Master on/off. Also on the panel flyout menu. |
+| **不透明度 / Opacity** | Fill opacity, 1–100%. The color is always the foreground color. |
+| **ブラシで境界線を描く / Stroke border with brush** | Also stroke the selection outline with the current brush. See [below](#stroke-border-with-brush). |
+| **塗りつぶさずに選択範囲だけ残す / Selection only** | Paint nothing and keep the selection. See [below](#selection-only-mode). |
+| **削除モードの判定 / Delete-mode detection** | How the plugin decides you want to erase. Three methods, see [below](#delete-mode-detection). |
+| **投げ縄ツールのみ / Lasso tools only** | Turn off to also react to marquee, quick selection and magic wand. |
+| **1 ヒストリーにまとめる / Single history state** | Group fill and deselect into one undo step. |
+
+Settings are stored in `settings.json` inside the plugin's data folder.
+
+### Stroke border with brush
+
+Converts the selection to a work path and runs *Stroke Path* with the current brush.
+Everything configured on the Brush tool is honoured. In erase mode the eraser is used
+instead, so the outline behaves like the interior.
+
+The selection has to be dropped before stroking — otherwise the brush is clipped by it and
+only the inner half of the line is drawn. The plugin handles that and restores the selection
+afterwards if needed.
+
+### Selection-only mode
+
+Nothing is painted; the selection stays active.
+
+| Selection only | Stroke border | Plain lasso drag |
+| :---: | :---: | --- |
+| off | off | fill → deselect |
+| off | on | fill + outline → deselect |
+| **on** | off | nothing drawn, selection kept |
+| **on** | **on** | nothing drawn, selection = **original ∪ area the brush would cover** |
+
+The last row is useful for "select this shape, plus the margin my brush would add".
+
+### Delete-mode detection
+
+| Method | How it works |
+| --- | --- |
+| **Key state** (default) | Reads the real modifier-key state. Ctrl / Alt / Shift selectable. |
+| **Selection combine mode** | Photoshop reports Shift and Alt lassos as different events (`addTo` / `subtractFrom`). Uses that instead. No ExtendScript needed. |
+| **Panel toggle** | No modifier keys — flip fill/erase with a radio button. |
+
+## Keyboard shortcut
+
+UXP has no API for registering global keyboard shortcuts, so the plugin borrows
+Photoshop's own "assign a shortcut to a script" mechanism.
+
+1. Copy `scripts/lassoDraw Toggle.jsx` into Photoshop's scripts folder
+   - Windows: `C:\Program Files\Adobe\Adobe Photoshop <year>\Presets\Scripts\`
+   - macOS: `/Applications/Adobe Photoshop <year>/Presets/Scripts/`
+2. Restart Photoshop. **File > Scripts > lassoDraw Toggle** appears.
+3. **Edit > Keyboard Shortcuts** → *Application Menus* → **File > Scripts > lassoDraw Toggle**
+   → assign a key.
+
+The script itself does nothing. Photoshop broadcasts every script run as an
+`AdobeScriptAutomation Scripts` action event carrying `javaScriptName`; the panel watches
+for that name and flips its enabled state. Event-driven, no polling.
+
+## How it works
+
+Photoshop's UXP API cannot do several things this plugin needs. The workarounds are the
+interesting part of this repository.
+
+### Detecting a new selection
+
+`action.addNotificationListener(["set", "addTo", "subtractFrom"], …)` watches the selection
+channel. Notifications whose `to` is `{_enum: "ordinal"}` (deselect, select-all) are ignored,
+which also prevents the plugin's own deselect from re-triggering it.
+
+### Reading modifier keys
+
+UXP exposes no global keyboard state — `photoshop.core` has no keyboard API and there is no
+equivalent of ScriptUI's `keyboardState`. Only `event.ctrlKey` inside the panel's own UI is
+available, which is useless while the canvas has focus.
+
+ExtendScript *does* have it. The plugin generates a `.jsx` at runtime, runs it through
+`batchPlay` and reads the result back from a file:
 
 ```
-UXP (main.js)
-  └ batchPlay { _obj: "AdobeScriptAutomation Scripts", javascript: { _kind:"local", _path: token } }
-      └ ExtendScript (ld_*.jsx)
-          └ 結果を ld_*.out.txt に "<本文>\n<書き出し時刻>" 形式で書き出し
-UXP が同ファイルを読み取る
+UXP ── batchPlay { _obj: "AdobeScriptAutomation Scripts", javascript: { _kind: "local", _path: token } }
+     └── ExtendScript ── ScriptUI.environment.keyboardState
+                      └── writes "ctrl,shift,alt,meta\n<timestamp>"
+UXP ── reads the file back
 ```
 
-`.jsx` はプラグインのデータフォルダーへ実行時に生成し、セッショントークンで実行します。
-書き出された値のタイムスタンプが 5 秒以上古い場合は「取得失敗」と判定します。
-実装は [extendscript.js](extendscript.js) にまとまっています。
+The timestamp guards against stale reads; anything older than 5 seconds counts as a failure
+and falls back to filling (never erasing) so a missed key press cannot destroy pixels.
+The ExtendScript engine is slow on first use, so the plugin warms it up once at load.
 
-### 1. モディファイアキーの取得
+### Stroking the border
 
-`photoshop.core` にキーボード関連 API は無く、ScriptUI の `keyboardState` 相当も未実装です。
-ExtendScript の `ScriptUI.environment.keyboardState` はグローバルなキー状態を返すため、
-これを読んで Ctrl / Cmd の押下を判定します。
+`batchPlay`'s `{_obj: "stroke"}` is rejected inside an `executeAsModal` scope, returning
+`{_obj: "error", message: "", result: -128}` — "user cancelled". Changing the tool id
+(`paintbrushTool` / `brushTool` / `pencilTool`) makes no difference; the command itself is
+refused. ExtendScript's `PathItem.strokePath()` has no such restriction, so the border goes
+through the same bridge. There is no `batchPlay` fallback for this feature — it needs
+ExtendScript.
 
-- ExtendScript エンジンの初回起動は遅いため、パネル読み込み後に一度空打ちして温めます。
-- 取得に失敗した場合は削除ではなく塗りつぶしにフォールバックします（誤削除防止）。
+### Measuring what the brush covers
 
-### 2. 境界線の描画
+There is no API that reports the footprint of a brush — softness, scattering and tip shape
+only resolve when rasterized. So the plugin paints onto a **throwaway layer**, reads that
+layer's opaque pixels as a selection, unions it with the work path, then deletes the layer.
+Nothing is written to the artwork.
 
-batchPlay の `{_obj:"stroke"}`（パスの境界線を描く）は、`executeAsModal` のスコープ内から
-呼ぶと `{_obj:"error", message:"", result:-128}`（= ユーザーがキャンセル）で拒否される
-環境があります。ツール ID を `paintbrushTool` / `brushTool` / `pencilTool` と変えても同じ
-結果になるため、コマンド自体がモーダルスコープで弾かれています。
+The temporary layer is created with ActionManager (`Mk` / `Lyr`) rather than
+`doc.artLayers.add()`, because the latter inserts at the document root and would target the
+wrong layer when the active layer sits inside a group.
 
-ExtendScript の DOM API にはこの制約が無いので、そちらで実行します。
+### Not being interrupted by dialogs
 
-```javascript
-doc.selection.makeWorkPath(1.0);
-doc.selection.deselect();
-workPath.strokePath(ToolType.BRUSH);  // 削除モードは ToolType.ERASER
-workPath.remove();
-```
+Two separate causes, both fixed:
 
-ブリッジが使えない環境では batchPlay 版に自動フォールバックします。
+- `_options.dialogOptions` was `"dontDisplay"`, which per Adobe's docs *"is executed without
+  UI unless an error occurs, or if the command needs additional parameters — in that case UI
+  may be shown"*. On a transparency-locked layer the Fill command wanted the missing
+  `preserveTransparency` parameter and popped its dialog. Now every command uses `"silent"`,
+  which returns a scripting error instead, and `preserveTransparency` is passed explicitly.
+- ExtendScript's `app.displayDialogs` defaults to `DialogModes.ERROR`, so errors are shown as
+  dialogs even when `executeAction` is given `DialogModes.NO`. The generated scripts set it to
+  `DialogModes.NO` and restore it afterwards.
 
-### 3. 「元の選択範囲 ∪ ブラシの範囲」の取得
+### Locked layers
 
-「塗りつぶさずに選択範囲だけ残す」＋「ブラシで境界線を描く」の組み合わせでは、
-**何も描かずに**「元の選択範囲 ∪ ブラシが塗るはずの範囲」を選択状態にします。
+Operations Photoshop would refuse are skipped up front, with the reason logged to the console.
 
-ブラシが覆う範囲はぼけ足・散布・先端形状に左右され、ラスタライズしないと確定しません。
-Photoshop には「このブラシが覆う範囲」を問い合わせる API がないため、
-**使い捨ての一時レイヤーへ実際に描いて実測し、そのレイヤーごと破棄**しています。
+| Lock | Fill | Erase |
+| --- | --- | --- |
+| Lock all | skip | skip |
+| Lock image pixels | skip | skip |
+| Lock transparent pixels | run (opaque pixels only) | skip |
+| Lock position | run | run |
 
-1. 選択範囲 → 作業用パス、選択解除
-2. 現在のレイヤーの**真上に一時レイヤーを作成**（同じグループ内に作る必要があるため
-   `doc.artLayers.add()` ではなく ActionManager の `Mk / Lyr` を使用）
-3. 一時レイヤーへ境界線を描く
-4. 一時レイヤーの不透明部分を選択範囲として読み込む＝ブラシが塗った範囲
-5. 作業用パスから `SelectionType.EXTEND` で元の形状を追加＝求める合成範囲
-6. 一時レイヤーを削除し、元のレイヤーをアクティブに戻す
+Selection-only mode never touches the layer, so it works under any lock.
 
-元のレイヤーには一切描き込まれません。
-
-> 「選択範囲を拡張」（`expand`）でブラシ半径ぶん広げる方法もありますが、
-> ソフトブラシや散布ブラシでは実際の塗り範囲と一致しないため採用していません。
-
-### 判定方法は 3 通りから選べます
-
-パネルの「削除モードの判定方法」で切り替えます。
-
-1. **キー状態を直接取得**（既定） — 上記の ExtendScript 経由。Ctrl / Alt / Shift から選択可。
-2. **選択の合成方法で判定** — Photoshop は選択範囲の合成方法をイベント名で通知します
-   （修飾なし → `set` / Shift → `addTo` / Alt → `subtractFrom`）。
-   これを修飾キー代わりに使う方式で、ExtendScript に依存しません。
-   将来 Photoshop から ExtendScript が外れた場合のフォールバックにもなります。
-3. **パネルで切り替え** — 修飾キーを使わず、パネル上で塗りつぶし / 削除を切り替えます。
-
-## パネルの設定項目
-
-- **lassoDraw を有効にする** — 監視の ON / OFF（パネルのフライアウトメニューからも切替可）
-- **不透明度** — 塗りつぶしの不透明度（1〜100%）。色は常に描画色です
-- **ブラシで境界線を描く** — 下記参照
-- **塗りつぶさずに選択範囲だけ残す** — ON にすると通常の投げ縄では一切描かず、
-  選択範囲を残します（選択解除もしません）。「ブラシで境界線を描く」が ON なら
-  **元の選択範囲 ∪ ブラシが塗るはずの範囲** を選択状態にします（描画はしません）。
-  削除（修飾キー）の動作は変わりません
-- **削除モードの判定方法** — 上記 3 方式
-- **投げ縄ツールのみ対象** — OFF にすると長方形・楕円選択、クイック選択、
-  自動選択ツールでも動作します
-- **1 ヒストリーにまとめる** — 塗りつぶし（削除）と選択解除を 1 回の Undo で戻せるようにします
-
-設定はプラグインのデータフォルダー内 `settings.json` に自動保存されます。
-
-## ブラシで境界線を描く
-
-チェックすると、塗りつぶし（削除）に加えて選択範囲の輪郭を **現在のブラシ** でなぞります。
-ブラシツールに設定されているサイズ・硬さ・ブラシ先端・散布などがそのまま反映されます。
-
-処理の順番は次の通りです。
-
-1. 塗りつぶし（または削除）
-2. 選択範囲 → 作業用パスに変換（許容値 1.0px）
-3. **選択範囲を解除**
-4. パスの境界線を描く（塗りつぶしモード = ブラシツール / 削除モード = 消しゴムツール）
-5. 作業用パスを破棄
-
-手順 3 を先に行うのは、選択範囲が残ったままだとブラシがそれでクリップされ、
-線の内側半分しか描かれないためです。
-
-手順 2〜5 は ExtendScript 側で実行します（理由は上記「境界線の描画」参照）。
-また、これらは `suspendHistory` の外で実行するため、「1 ヒストリーにまとめる」を
-ONにしていても塗りつぶしと境界線は別のヒストリー項目になります。
-
-既存の作業用パスがある場合は置き換えられます（名前付きパスには影響しません）。
-
-## ショートカットで ON / OFF を切り替える
-
-UXP には独自のグローバルキーボードショートカットを登録する API がありません。
-そこで **Photoshop 側の「スクリプトにキーボードショートカットを割り当てる」仕組み**を
-間借りしています。
-
-### 設定手順
-
-1. `scripts/lassoDraw Toggle.jsx` を Photoshop の Scripts フォルダーへコピーします。
-
-   - Windows: `C:\Program Files\Adobe\Adobe Photoshop <年>\Presets\Scripts\`
-   - macOS: `/Applications/Adobe Photoshop <年>/Presets/Scripts/`
-
-   （管理者権限が必要な場合があります）
-
-2. Photoshop を再起動します。
-   **ファイル > スクリプト > lassoDraw Toggle** が現れます。
-3. **編集 > キーボードショートカット** を開き、
-   「ショートカット」を **アプリケーションメニュー** に切り替え、
-   **ファイル > スクリプト > lassoDraw Toggle** に好きなキーを割り当てます。
-
-以降、そのキーで lassoDraw の有効 / 無効が切り替わります（パネルのチェックボックスに連動）。
-
-### しくみ
-
-スクリプト自体は何もしません。Photoshop はスクリプトの実行を
-`AdobeScriptAutomation Scripts` アクションイベントとしてブロードキャストし、
-そのディスクリプタにスクリプト名 (`javaScriptName`) が入ります。
-パネルはこのイベントを監視し、名前に `lassodraw` を含むものが実行されたときに
-有効 / 無効を反転させます。
-
-プラグイン自身が実行する `.jsx`（キー状態取得・境界線描画）は
-名前ではなくファイルパスで指定するため、この判定には引っかかりません。
-
-パネルのフライアウトメニュー（右上の三本線）からも切り替えられます。
-
-## インストール
-
-### 開発用（UXP Developer Tool）
-
-1. [UXP Developer Tool](https://developer.adobe.com/photoshop/uxp/2022/guides/devtool/) を起動
-2. `Add Plugin...` からこのフォルダーの `manifest.json` を選択
-3. Photoshop を起動した状態で `Load` をクリック
-4. Photoshop の **プラグイン > lassoDraw** からパネルを表示
-
-### 配布用（.ccx）
-
-同梱の `package.ps1` を実行すると `dist/<id>_PS.ccx` が作られます。
+## Building a `.ccx`
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File package.ps1
 ```
 
-`.ccx` は manifest.json をルートに置いた ZIP です。配布に不要なもの
-（`check/` `.git/` `dist/` など）を巻き込まないよう、含めるファイルを
-スクリプト内で明示的に列挙しています。ファイルを追加したら `$include` にも追記してください。
+Produces `dist/<id>_PS.ccx`. A `.ccx` is an unsigned ZIP with `manifest.json` at the root —
+the UXP Developer Tool's own `PluginPackageCommand` is just `archiver` with no signing step.
 
-`.ccx` は署名なしの ZIP です（UXP Developer Tool の `PluginPackageCommand` も
-archiver で zip を作るだけで、署名処理は行っていません）。ただし manifest には
-パッケージ時の必須項目があり、満たしていないと Creative Cloud のインストールが
-**エラーコード -4** で失敗します。`package.ps1` は同じ検証を実行します。
+It does, however, validate the manifest first, and Creative Cloud fails installation with
+**error code -4** when those requirements are not met. `package.ps1` runs the same checks:
 
-- `version` が `x.y.z` 形式であること
-- `manifestVersion` が 4 以上
-- `host.minVersion` が 22 以上
-- **`icons` 配列があること**
-- **panel entrypoint にも `icons` 配列があること**
+- `version` in `x.y.z` form
+- `manifestVersion` ≥ 4
+- `host.minVersion` ≥ 22
+- an `icons` array at the top level
+- an `icons` array on every panel entrypoint
 
-UXP Developer Tool の `Package` ボタンでも生成できます。そちらは `.gitignore` を
-尊重してファイルを集めるため `check/` は除外されますが、`.gitignore` に無いものは
-すべて同梱される点に注意してください。
+Files included in the package are listed explicitly in `$include`, so add new ones there.
 
-未署名の `.ccx` は環境によってインストールが拒否されることがあります。その場合は
-上記の UXP Developer Tool 経由での読み込みを案内してください。
-Adobe Marketplace / Exchange で公開する場合は、Adobe Developer Console で発行された
-プラグイン id に差し替える必要があります（`manifest.json` の `id`）。
-
-## 動作要件
-
-- Photoshop 24.0 以降（UXP manifestVersion 5）
-- Ctrl 検出には ExtendScript が有効であること（Photoshop 2026 時点では有効）
-
-## ファイル構成
+## Layout
 
 ```
-manifest.json               プラグイン定義
-index.html                  パネル UI
-styles.css                  パネルのスタイル
-main.js                     イベント監視と batchPlay 処理
-extendscript.js             ExtendScript ブリッジ（キー状態取得 / 境界線描画）
-scripts/lassoDraw Toggle.jsx  ショートカット用（Photoshop の Presets/Scripts へ）
-package.ps1                 .ccx を作るスクリプト
+manifest.json                 plugin definition
+index.html / styles.css       panel UI
+main.js                       event listening, batchPlay commands
+extendscript.js               ExtendScript bridge (key state, border stroke)
+icons/                        panel and plugin icons
+scripts/lassoDraw Toggle.jsx  shortcut helper, goes in Photoshop's Presets/Scripts
+package.ps1                   builds the .ccx
 ```
 
-## ロックされたレイヤー
+## License
 
-ロック状態によっては Photoshop がコマンドを拒否し、モーダルのエラーダイアログを
-出してしまうため、実行前にロック状態を調べてスキップします
-（スキップした理由は UXP Developer Tool のコンソールに出ます）。
-
-| ロック | 塗りつぶし | 削除 |
-| --- | --- | --- |
-| すべてをロック | スキップ | スキップ |
-| 画像ピクセルをロック | スキップ | スキップ |
-| 透明ピクセルをロック | 実行（不透明部分のみ塗られます） | スキップ |
-
-| 位置をロック | 実行 | 実行 |
-
-「塗りつぶさずに選択範囲だけ残す」は元のレイヤーを一切触らないため、
-どのロック状態でも動作します。
-
-透明ピクセルロック時は Photoshop が「透明部分の保持」を強制するため、塗りつぶしの
-descriptor に `preserveTransparency` を明示的に渡しています。これが無いと
-Photoshop が「パラメータが足りない」と判断し、塗りつぶしのオプションダイアログを
-表示して処理が止まります。
-
-あわせて `_options.dialogOptions` を `"dontDisplay"` から **`"silent"`** に変更しました。
-公式ドキュメントによると `"dontDisplay"` は
-「エラー時や追加パラメータが必要な場合は UI を表示することがある」
-であるのに対し、`"silent"` は UI を出さずスクリプトエラーとして返します。
-
-ExtendScript 側でも `app.displayDialogs = DialogModes.NO` を設定しています。
-`app.displayDialogs` の既定は `DialogModes.ERROR` で、`executeAction` に
-`DialogModes.NO` を渡してもエラーはダイアログ表示されてしまうためです。
-
-## 実装メモ
-
-- `action.addNotificationListener(["set", "addTo", "subtractFrom"], ...)` で
-  選択範囲チャンネルへの変更を監視します。
-- `to` が `{_enum: "ordinal"}` の通知（選択解除・すべてを選択）は無視します。
-  これによりプラグイン自身が発行する選択解除でループしません。加えて `processing`
-  フラグで多重実行を抑止しています。
-- Alt（`subtractFrom`）を削除トリガーにした場合、Photoshop 側の処理結果は
-  「既存範囲から引いた選択範囲」になるため、通知ディスクリプタに含まれる
-  形状データ（`to`）から選択範囲を作り直してから削除します。
-- 実際の描画は `core.executeAsModal()` 内の `batchPlay` で実行します。
-  Photoshop が別のモーダル状態だった場合は 120ms 後に 1 度だけ再試行します。
-- `AdobeScriptAutomation Scripts` のディスクリプタキーは環境によって
-  `javascript` / `javaScript` の揺れがあるため、実際に結果が読めた方を採用します。
-- 「パスの境界線を描く」の `using` に渡すツール ID は `brushTool` ではなく
-  **`paintbrushTool`**（charID の `PbTl`）。`brushTool` を渡すとメッセージの無い
-  エラーディスクリプタが返ります。バージョン差に備えて
-  `paintbrushTool` → `brushTool` → `pencilTool` の順に試し、通った ID を記憶します。
-- 作業用パスの削除は `{_ref:"path", _enum:"ordinal", _value:"targetEnum"}`（現在のパス）を
-  使います。`{_ref:"path", _property:"workPath"}` はパスを *選択* するための参照であり、
-  `delete` に渡すと Photoshop が「要求された操作を完了できません。プログラムエラーです。」
-  を出します。
-- batchPlay は失敗を reject ではなく結果オブジェクト（`_obj: "error"`）で返す場合があるため、
-  `play()` ヘルパーで戻り値も検査し、どのステップで落ちたかをステータス欄に表示します。
-  詳細は UXP Developer Tool のコンソールにも出力されます。
+Not yet chosen — see the repository owner.
