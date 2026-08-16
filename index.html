@@ -6,87 +6,57 @@
   </head>
   <body>
     <div class="panel">
-      <sp-checkbox id="enabled" checked>lassoDraw を有効にする</sp-checkbox>
+      <sp-checkbox id="enabled" size="s" checked>有効</sp-checkbox>
 
-      <div id="status" class="status">待機中</div>
+      <sp-slider id="opacity" min="1" max="100" step="1" value="100" size="s">
+        <sp-label slot="label">不透明度</sp-label>
+      </sp-slider>
+
+      <sp-checkbox id="strokeBorder" size="s">ブラシで境界線を描く</sp-checkbox>
+      <sp-checkbox id="selectionOnly" size="s"
+        >塗りつぶさずに選択範囲だけ残す</sp-checkbox
+      >
 
       <sp-divider size="medium"></sp-divider>
 
-      <div class="section">
-        <sp-label class="section-title">塗りつぶし</sp-label>
-        <sp-radio-group id="fillSource" name="fillSource" column>
-          <sp-radio value="foregroundColor" checked>描画色</sp-radio>
-          <sp-radio value="backgroundColor">背景色</sp-radio>
+      <sp-label class="title">削除モードの判定</sp-label>
+      <sp-radio-group id="modifierSource" name="modifierSource" size="s" column>
+        <sp-radio value="keyboard" checked>キー状態を直接取得</sp-radio>
+        <sp-radio value="event">選択の合成方法で判定</sp-radio>
+        <sp-radio value="panel">パネルで切り替え</sp-radio>
+      </sp-radio-group>
+
+      <div id="keyboardOptions" class="sub">
+        <sp-radio-group id="deleteKey" name="deleteKey" size="s" column>
+          <sp-radio value="ctrlKey" checked>Ctrl / Cmd で削除</sp-radio>
+          <sp-radio value="altKey">Alt で削除</sp-radio>
+          <sp-radio value="shiftKey">Shift で削除</sp-radio>
         </sp-radio-group>
-        <sp-slider id="opacity" min="1" max="100" step="1" value="100">
-          <sp-label slot="label">不透明度</sp-label>
-        </sp-slider>
       </div>
 
-      <sp-divider size="medium"></sp-divider>
-
-      <div class="section">
-        <sp-checkbox id="strokeBorder">ブラシで境界線を描く</sp-checkbox>
-        <sp-body size="XS" class="note"
-          >選択範囲を作業用パスに変換し、現在のブラシ設定（サイズ・硬さ・ブラシ先端）で
-          「パスの境界線を描く」を実行します。削除モードのときは消しゴムでなぞります。
-          既存の作業用パスは置き換えられます。</sp-body
-        >
-      </div>
-
-      <sp-divider size="medium"></sp-divider>
-
-      <div class="section">
-        <sp-label class="section-title">削除モードの判定方法</sp-label>
-        <sp-radio-group id="modifierSource" name="modifierSource" column>
-          <sp-radio value="keyboard" checked>キー状態を直接取得</sp-radio>
-          <sp-radio value="event">選択の合成方法で判定</sp-radio>
-          <sp-radio value="panel">パネルで切り替え</sp-radio>
+      <div id="eventOptions" class="sub hidden">
+        <sp-radio-group id="deleteTrigger" name="deleteTrigger" size="s" column>
+          <sp-radio value="addTo" checked>Shift + 投げ縄で削除</sp-radio>
+          <sp-radio value="subtractFrom">Alt + 投げ縄で削除</sp-radio>
         </sp-radio-group>
+      </div>
 
-        <div id="keyboardOptions" class="sub">
-          <sp-label class="sub-title">「キー状態を直接取得」の設定</sp-label>
-          <sp-radio-group id="deleteKey" name="deleteKey" column>
-            <sp-radio value="ctrlKey" checked>Ctrl（Mac は Cmd）で削除</sp-radio>
-            <sp-radio value="altKey">Alt で削除</sp-radio>
-            <sp-radio value="shiftKey">Shift で削除</sp-radio>
-          </sp-radio-group>
-          <div id="keystateNotice" class="note">Ctrl 検出: 未確認</div>
-          <sp-action-button id="recheck" size="s" quiet>再チェック</sp-action-button>
-          <sp-body size="XS" class="note"
-            >ExtendScript の keyboardState を batchPlay 経由で読みます。Windows では
-            投げ縄の開始時に Ctrl を押すと移動ツールに切り替わるため、ドラッグ後・
-            マウスを離す直前に Ctrl を押してください。</sp-body
-          >
-        </div>
+      <div id="panelOptions" class="sub hidden">
+        <sp-radio-group id="panelMode" name="panelMode" size="s" column>
+          <sp-radio value="fill" checked>塗りつぶし</sp-radio>
+          <sp-radio value="delete">削除</sp-radio>
+        </sp-radio-group>
+      </div>
 
-        <div id="eventOptions" class="sub hidden">
-          <sp-label class="sub-title">「選択の合成方法で判定」の設定</sp-label>
-          <sp-radio-group id="deleteTrigger" name="deleteTrigger" column>
-            <sp-radio value="addTo" checked>Shift + 投げ縄で削除</sp-radio>
-            <sp-radio value="subtractFrom">Alt + 投げ縄で削除</sp-radio>
-          </sp-radio-group>
-          <sp-body size="XS" class="note"
-            >Photoshop が Shift / Alt を別イベントとして通知する性質を使います。
-            ExtendScript に依存しないため確実です。</sp-body
-          >
-        </div>
-
-        <div id="panelOptions" class="sub hidden">
-          <sp-label class="sub-title">「パネルで切り替え」の設定</sp-label>
-          <sp-radio-group id="panelMode" name="panelMode" column>
-            <sp-radio value="fill" checked>塗りつぶし</sp-radio>
-            <sp-radio value="delete">削除</sp-radio>
-          </sp-radio-group>
-        </div>
+      <div id="keystateWarning" class="warning hidden">
+        <div id="keystateNotice"></div>
+        <sp-action-button id="recheck" size="s" quiet>再チェック</sp-action-button>
       </div>
 
       <sp-divider size="medium"></sp-divider>
 
-      <div class="section">
-        <sp-checkbox id="lassoOnly" checked>投げ縄ツールのみ対象</sp-checkbox>
-        <sp-checkbox id="oneUndo" checked>1 ヒストリーにまとめる</sp-checkbox>
-      </div>
+      <sp-checkbox id="lassoOnly" size="s" checked>投げ縄ツールのみ</sp-checkbox>
+      <sp-checkbox id="oneUndo" size="s" checked>1 ヒストリーにまとめる</sp-checkbox>
     </div>
 
     <script src="main.js"></script>

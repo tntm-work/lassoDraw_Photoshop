@@ -17,10 +17,10 @@
       "label": {
         "default": "lassoDraw"
       },
-      "minimumSize": { "width": 220, "height": 200 },
+      "minimumSize": { "width": 180, "height": 140 },
       "maximumSize": { "width": 1200, "height": 1200 },
-      "preferredDockedSize": { "width": 260, "height": 380 },
-      "preferredFloatingSize": { "width": 300, "height": 420 }
+      "preferredDockedSize": { "width": 210, "height": 290 },
+      "preferredFloatingSize": { "width": 230, "height": 310 }
     }
   ],
   "requiredPermissions": {

@@ -38,11 +38,20 @@ const OTHER_SELECTION_TOOLS = [
 /** 監視する選択範囲系イベント */
 const WATCHED_EVENTS = ["set", "addTo", "subtractFrom"];
 
+/**
+ * ショートカット用。UXP には独自のグローバルショートカットを登録する API が無いため、
+ * Photoshop 側の「スクリプトにキーボードショートカットを割り当てる」仕組みを間借りする。
+ * scripts/lassoDraw Toggle.jsx を Photoshop の Presets/Scripts に置き、
+ * そのスクリプトが実行されたことをアクションイベントとして検知して ON/OFF を切り替える。
+ */
+const SCRIPT_EVENT = "AdobeScriptAutomation Scripts";
+const TOGGLE_SCRIPT_KEYWORD = "lassodraw";
+
 const settings = {
   enabled: true,
-  fillSource: "foregroundColor", // "foregroundColor" | "backgroundColor"
   opacity: 100,
   strokeBorder: false, // 現在のブラシで境界線を描く
+  selectionOnly: false, // 塗りつぶさずに選択範囲だけ残す（削除モードには影響しない）
   modifierSource: "keyboard", // "keyboard" | "event" | "panel"
   deleteKey: "ctrlKey", // modifierSource === "keyboard" のとき
   deleteTrigger: "addTo", // modifierSource === "event" のとき ("addTo" | "subtractFrom")
@@ -85,14 +94,25 @@ async function saveSettings() {
 // batchPlay ディスクリプタ
 // ---------------------------------------------------------------------------
 
-const NO_DIALOG = { dialogOptions: "dontDisplay" };
+/**
+ * "dontDisplay" は「エラー時や追加パラメータが必要な場合は UI を表示することがある」
+ * という仕様で、実際に塗りつぶしのオプションダイアログが出てしまう。
+ * "silent" なら UI を出さずスクリプトエラーとして返ってくる。
+ */
+const NO_DIALOG = { dialogOptions: "silent" };
 
-function fillCommand() {
+/**
+ * 透明ピクセルをロックしたレイヤーでは Photoshop が「透明部分の保持」を強制する。
+ * preserveTransparency を渡さないと「パラメータが足りない」と判断され、
+ * 塗りつぶしダイアログが表示されてしまうので明示的に指定する。
+ */
+function fillCommand(preserveTransparency) {
   return {
     _obj: "fill",
-    using: { _enum: "fillContents", _value: settings.fillSource },
+    using: { _enum: "fillContents", _value: "foregroundColor" },
     opacity: { _unit: "percentUnit", _value: settings.opacity },
     mode: { _enum: "blendMode", _value: "normal" },
+    preserveTransparency: !!preserveTransparency,
     _options: NO_DIALOG,
   };
 }
@@ -178,6 +198,20 @@ const DELETE_PATH_TARGETS = [
 let deletePathTargetIndex = -1;
 let deletePathBroken = false;
 
+/**
+ * 作業用パスから選択範囲を作り直す (batchPlay 版フォールバック用)。
+ * こちらは元の投げ縄の形しか復元できず、ブラシが塗った範囲との合成は行わない。
+ */
+function selectionFromWorkPathCommand() {
+  return {
+    _obj: "set",
+    _target: [{ _ref: "channel", _property: "selection" }],
+    to: { _ref: "path", _enum: "ordinal", _value: "targetEnum" },
+    antiAlias: true,
+    _options: NO_DIALOG,
+  };
+}
+
 function deleteWorkPathCommand(target) {
   return { _obj: "delete", _target: target, _options: NO_DIALOG };
 }
@@ -211,14 +245,21 @@ async function removeWorkPath() {
  * `{_obj:"error", message:"", result:-128}`（ユーザーがキャンセル）で拒否される
  * 環境があるため。ExtendScript の PathItem.strokePath() にはその制約が無い。
  *
+ * measureOnly が true なら実際には描かず、
+ * 「元の選択範囲 ∪ ブラシが塗るはずの範囲」を選択状態にして返す。
  * 戻り値の deselected が true なら選択解除まで済んでいる。
  */
-async function drawBorder(mode) {
+async function drawBorder(mode, measureOnly) {
   const toolType = mode === "fill" ? "BRUSH" : "ERASER";
+  const keep = !!measureOnly;
 
   if (es.isAvailable() !== false) {
-    const result = await es.strokeSelectionBorder(toolType, WORK_PATH_TOLERANCE);
-    if (result === "ok") return { deselected: true };
+    const result = await es.strokeSelectionBorder(
+      toolType,
+      WORK_PATH_TOLERANCE,
+      keep
+    );
+    if (result === "ok") return { deselected: !keep };
     if (result !== null) {
       // ExtendScript は動いたが Photoshop 側の処理で失敗した
       const err = new Error("境界線の描画 / " + result);
@@ -232,8 +273,11 @@ async function drawBorder(mode) {
   await play("作業用パスの作成", makeWorkPathCommand());
   await play("選択解除", deselectCommand());
   await strokeWorkPathViaBatchPlay(mode);
+  if (keep) {
+    await play("選択範囲の復元", selectionFromWorkPathCommand());
+  }
   await removeWorkPath();
-  return { deselected: true };
+  return { deselected: !keep };
 }
 
 /**
@@ -297,6 +341,50 @@ async function getCurrentToolId() {
   }
 }
 
+/**
+ * アクティブレイヤーのロック状態を取得する。
+ * 取得できなければ null（その場合はチェックせずに通す）。
+ */
+async function getLayerLocking() {
+  try {
+    const result = await action.batchPlay(
+      [
+        {
+          _obj: "get",
+          _target: [
+            { _property: "layerLocking" },
+            { _ref: "layer", _enum: "ordinal", _value: "targetEnum" },
+          ],
+          _options: NO_DIALOG,
+        },
+      ],
+      { synchronousExecution: false }
+    );
+    return (result && result[0] && result[0].layerLocking) || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * ロック状態から、この操作が Photoshop に拒否されるかを判定する。
+ * 拒否される場合は理由の文字列、問題なければ null を返す。
+ *
+ * 事前に弾かないと Photoshop がモーダルのエラーダイアログを出してしまい、
+ * 投げ縄のたびに操作が止まる。
+ */
+function lockBlockReason(locking, mode) {
+  if (!locking) return null;
+  if (locking.protectAll) return "レイヤーがロックされています";
+  // 画像ピクセルのロック中は塗りつぶしも削除も描画もできない
+  if (locking.protectComposite) return "画像ピクセルがロックされています";
+  // 透明ピクセルのロック中は透明にできない = 削除が通らない
+  if (mode === "delete" && locking.protectTransparency) {
+    return "透明ピクセルがロックされているため削除できません";
+  }
+  return null;
+}
+
 function isAllowedTool(toolId) {
   if (!toolId) return true; // 判定できない場合は通す
   if (LASSO_TOOLS.indexOf(toolId) >= 0) return true;
@@ -304,11 +392,13 @@ function isAllowedTool(toolId) {
   return OTHER_SELECTION_TOOLS.indexOf(toolId) >= 0;
 }
 
+/**
+ * 実行結果はパネルには出さず、UXP Developer Tool のコンソールにだけ流す。
+ * 描画のたびにパネルの表示が変わると邪魔になるため。
+ */
 function setStatus(text, isError) {
-  const el = document.getElementById("status");
-  if (!el) return;
-  el.textContent = text;
-  el.className = isError ? "status error" : "status";
+  if (isError) console.error("[lassoDraw]", text);
+  else console.log("[lassoDraw]", text);
 }
 
 function errorMessage(e) {
@@ -422,11 +512,42 @@ async function onSelectionEvent(eventName, descriptor) {
   }
 }
 
+/** ディスクリプタから文字列を取り出す（`"名前"` と `{_value:"名前"}` の両方に対応） */
+function stringValue(value) {
+  if (typeof value === "string") return value;
+  if (value && typeof value._value === "string") return value._value;
+  return null;
+}
+
+/**
+ * スクリプト実行イベントを監視して、ショートカット用スクリプトなら ON/OFF を切り替える。
+ * プラグイン自身が実行する .jsx（キー状態取得・境界線描画）は
+ * javaScriptName ではなくファイルパスで指定するので、ここでは弾かれる。
+ */
+function onScriptEvent(eventName, descriptor) {
+  console.log("[lassoDraw] script event", descriptor);
+  if (!descriptor) return;
+  // 自分が発行したファイル指定の実行は対象外
+  if (descriptor.javascript || descriptor.javaScript) return;
+  const name =
+    stringValue(descriptor.javaScriptName) ||
+    stringValue(descriptor.javascriptName);
+  if (!name) return;
+  if (name.toLowerCase().indexOf(TOGGLE_SCRIPT_KEYWORD) < 0) return;
+
+  settings.enabled = !settings.enabled;
+  applySettingsToUI();
+  saveSettings();
+}
+
 async function runOnSelection(plan, replayDescriptor) {
   let mode = plan.mode;
   let commandError = null;
   let strokeError = null;
   let keysMissing = false;
+  let skipped = false;
+  let blockedReason = null;
+  let locking = null;
 
   const body = async (context) => {
     if (mode === "pending") {
@@ -438,6 +559,31 @@ async function runOnSelection(plan, replayDescriptor) {
       } else {
         mode = isDeleteKeyDown(keys) ? "delete" : "fill";
       }
+    }
+
+    // ロックされたレイヤーはコマンドが Photoshop に拒否され、
+    // モーダルのエラーダイアログが出てしまうので事前に弾く。
+    // ただし「選択範囲だけ残す」は元のレイヤーを触らないので対象外。
+    if (!(mode === "fill" && settings.selectionOnly)) {
+      locking = await getLayerLocking();
+      blockedReason = lockBlockReason(locking, mode);
+      if (blockedReason) return;
+    }
+
+    // 「塗りつぶさずに選択範囲だけ残す」: 一切描かず、選択解除もしない。
+    // 境界線が ON のときは、ブラシが塗るはずの範囲を実測して
+    // 元の選択範囲と合成したものを選択状態にする（描画はしない）。
+    // 削除（修飾キー）は従来どおり動かす。
+    if (mode === "fill" && settings.selectionOnly) {
+      skipped = true;
+      if (settings.strokeBorder) {
+        try {
+          await drawBorder(mode, true);
+        } catch (e) {
+          strokeError = e;
+        }
+      }
+      return;
     }
 
     const label = mode === "fill" ? "lassoDraw: 塗りつぶし" : "lassoDraw: 削除";
@@ -460,7 +606,9 @@ async function runOnSelection(plan, replayDescriptor) {
       try {
         await play(
           mode === "fill" ? "塗りつぶし" : "削除",
-          mode === "fill" ? fillCommand() : deleteCommand()
+          mode === "fill"
+            ? fillCommand(locking && locking.protectTransparency)
+            : deleteCommand()
         );
       } catch (e) {
         // 空の選択範囲・ロックされたレイヤーなど。選択解除だけは行う。
@@ -485,7 +633,7 @@ async function runOnSelection(plan, replayDescriptor) {
     if (settings.strokeBorder) {
       try {
         // 削除モードでは消しゴムで境界線をなぞり、内側と挙動を揃える
-        const result = await drawBorder(mode);
+        const result = await drawBorder(mode, false);
         deselected = !!result.deselected;
       } catch (e) {
         strokeError = e;
@@ -503,7 +651,17 @@ async function runOnSelection(plan, replayDescriptor) {
 
   await executeAsModalWithRetry(body, "lassoDraw");
 
-  if (commandError) {
+  if (blockedReason) {
+    setStatus("スキップ: " + blockedReason);
+  } else if (skipped && strokeError) {
+    setStatus("失敗: " + errorMessage(strokeError), true);
+  } else if (skipped) {
+    setStatus(
+      settings.strokeBorder
+        ? "選択範囲（元 + ブラシ範囲）を残しました"
+        : "選択範囲を残しました"
+    );
+  } else if (commandError) {
     setStatus("失敗: " + errorMessage(commandError), true);
   } else if (strokeError) {
     setStatus("失敗: " + errorMessage(strokeError), true);
@@ -551,22 +709,20 @@ async function warmUpKeyState() {
   updateKeyStateNotice();
 }
 
+/** キー状態が取得できないときだけ警告を出す。正常時は何も表示しない。 */
 function updateKeyStateNotice() {
+  const wrap = document.getElementById("keystateWarning");
   const el = document.getElementById("keystateNotice");
-  if (!el) return;
-  const state = es.isAvailable();
-  if (state === true) {
-    el.textContent = "Ctrl 検出: 利用可能 (ExtendScript 経由)";
-    el.className = "note ok";
-  } else if (state === false) {
+  if (!wrap || !el) return;
+  if (es.isAvailable() === false) {
     el.textContent =
-      "Ctrl 検出: 利用できません（" +
+      "キー状態を取得できません（" +
       (es.getLastError() || "原因不明") +
-      "）。Shift / Alt 方式への切り替えを推奨します。";
-    el.className = "note ng";
+      "）。「選択の合成方法で判定」への切り替えを推奨します。";
+    wrap.className = "warning";
   } else {
-    el.textContent = "Ctrl 検出: 未確認";
-    el.className = "note";
+    el.textContent = "";
+    wrap.className = "warning hidden";
   }
 }
 
@@ -588,6 +744,14 @@ function syncSectionVisibility() {
 
 function describeState() {
   if (!settings.enabled) return "無効";
+  if (settings.selectionOnly && settings.modifierSource === "panel") {
+    return settings.panelMode === "fill"
+      ? "待機中 / 選択範囲を残すだけ"
+      : "待機中 / 選択範囲を削除";
+  }
+  if (settings.selectionOnly) {
+    return "待機中 / 通常=選択範囲を残す・修飾キー=削除";
+  }
   if (settings.modifierSource === "panel") {
     return settings.panelMode === "fill"
       ? "待機中 / 選択範囲を塗りつぶし"
@@ -612,9 +776,9 @@ function applySettingsToUI() {
     if (el) el[prop] = value;
   };
   set("enabled", "checked", settings.enabled);
-  set("fillSource", "value", settings.fillSource);
   set("opacity", "value", settings.opacity);
   set("strokeBorder", "checked", settings.strokeBorder);
+  set("selectionOnly", "checked", settings.selectionOnly);
   set("modifierSource", "value", settings.modifierSource);
   set("deleteKey", "value", settings.deleteKey);
   set("deleteTrigger", "value", settings.deleteTrigger);
@@ -641,10 +805,6 @@ function bindUI() {
     settings.enabled = !!e.target.checked;
     commit();
   });
-  on("fillSource", "change", (e) => {
-    settings.fillSource = e.target.value;
-    commit();
-  });
   on("opacity", "change", (e) => {
     const value = Number(e.target.value);
     if (!Number.isNaN(value)) settings.opacity = value;
@@ -652,6 +812,10 @@ function bindUI() {
   });
   on("strokeBorder", "change", (e) => {
     settings.strokeBorder = !!e.target.checked;
+    commit();
+  });
+  on("selectionOnly", "change", (e) => {
+    settings.selectionOnly = !!e.target.checked;
     commit();
   });
   on("modifierSource", "change", (e) => {
@@ -712,6 +876,11 @@ entrypoints.setup({
     await action.addNotificationListener(WATCHED_EVENTS, onSelectionEvent);
   } catch (e) {
     setStatus("イベント監視を開始できませんでした: " + errorMessage(e), true);
+  }
+  try {
+    await action.addNotificationListener([SCRIPT_EVENT], onScriptEvent);
+  } catch (e) {
+    setStatus("ショートカット監視を開始できませんでした: " + errorMessage(e), true);
   }
   // 起動直後は Photoshop 側も忙しいので少し待ってから温める
   setTimeout(warmUpKeyState, 1500);
