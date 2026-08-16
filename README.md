@@ -178,7 +178,30 @@ UXP には独自のグローバルキーボードショートカットを登録�
 
 ### 配布用（.ccx）
 
-UXP Developer Tool の `Package` から `.ccx` を生成し、ダブルクリックでインストールします。
+同梱の `package.ps1` を実行すると `dist/<id>_PS.ccx` が作られます。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File package.ps1
+```
+
+`.ccx` は manifest.json をルートに置いた ZIP です。配布に不要なもの
+（`check/` `.git/` `dist/` など）を巻き込まないよう、含めるファイルを
+スクリプト内で明示的に列挙しています。ファイルを追加したら `$include` にも追記してください。
+
+`.ccx` は署名なしの ZIP です（UXP Developer Tool の `PluginPackageCommand` も
+archiver で zip を作るだけで、署名処理は行っていません）。ただし manifest には
+パッケージ時の必須項目があり、満たしていないと Creative Cloud のインストールが
+**エラーコード -4** で失敗します。`package.ps1` は同じ検証を実行します。
+
+- `version` が `x.y.z` 形式であること
+- `manifestVersion` が 4 以上
+- `host.minVersion` が 22 以上
+- **`icons` 配列があること**
+- **panel entrypoint にも `icons` 配列があること**
+
+UXP Developer Tool の `Package` ボタンでも生成できます。そちらは `.gitignore` を
+尊重してファイルを集めるため `check/` は除外されますが、`.gitignore` に無いものは
+すべて同梱される点に注意してください。
 
 未署名の `.ccx` は環境によってインストールが拒否されることがあります。その場合は
 上記の UXP Developer Tool 経由での読み込みを案内してください。
@@ -199,6 +222,7 @@ styles.css                  パネルのスタイル
 main.js                     イベント監視と batchPlay 処理
 extendscript.js             ExtendScript ブリッジ（キー状態取得 / 境界線描画）
 scripts/lassoDraw Toggle.jsx  ショートカット用（Photoshop の Presets/Scripts へ）
+package.ps1                 .ccx を作るスクリプト
 ```
 
 ## ロックされたレイヤー

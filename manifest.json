@@ -20,7 +20,27 @@
       "minimumSize": { "width": 180, "height": 140 },
       "maximumSize": { "width": 1200, "height": 1200 },
       "preferredDockedSize": { "width": 210, "height": 290 },
-      "preferredFloatingSize": { "width": 230, "height": 310 }
+      "preferredFloatingSize": { "width": 230, "height": 310 },
+      "icons": [
+        {
+          "width": 23,
+          "height": 23,
+          "path": "icons/icon.png",
+          "scale": [1, 2],
+          "theme": ["darkest", "dark", "medium", "lightest", "light", "all"],
+          "species": ["generic"]
+        }
+      ]
+    }
+  ],
+  "icons": [
+    {
+      "width": 23,
+      "height": 23,
+      "path": "icons/icon.png",
+      "scale": [1, 2],
+      "theme": ["darkest", "dark", "medium", "lightest", "light", "all"],
+      "species": ["pluginList"]
     }
   ],
   "requiredPermissions": {
