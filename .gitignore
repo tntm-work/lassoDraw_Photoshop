@@ -1,0 +1,14 @@
+# 動作確認用に置いた第三者製の市販プラグイン（EULA あり）。絶対にコミットしない。
+check/
+
+# UXP Developer Tool の生成物
+*.ccx
+*.zxp
+dist/
+
+# OS / エディタ
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
