@@ -121,6 +121,15 @@ function deleteCommand() {
   return { _obj: "delete", _options: NO_DIALOG };
 }
 
+/** ヒストリーを 1 つ戻す（編集 > 取り消し 相当） */
+function undoCommand() {
+  return {
+    _obj: "select",
+    _target: [{ _ref: "historyState", _offset: -1 }],
+    _options: NO_DIALOG,
+  };
+}
+
 function deselectCommand() {
   return {
     _obj: "set",
@@ -386,7 +395,7 @@ async function onSelectionEvent(eventName, descriptor) {
     const toolId = await getCurrentToolId();
     if (!isAllowedTool(toolId)) return;
 
-    await runOnSelection(plan, plan.needReplay ? descriptor : null);
+    await runOnSelection(plan, descriptor, plan.needReplay ? descriptor : null);
   } catch (e) {
     setStatus("エラー: " + errorMessage(e), true);
   } finally {
@@ -424,7 +433,7 @@ function onScriptEvent(eventName, descriptor) {
   saveSettings();
 }
 
-async function runOnSelection(plan, replayDescriptor) {
+async function runOnSelection(plan, descriptor, replayDescriptor) {
   let mode = plan.mode;
   let commandError = null;
   let strokeError = null;
@@ -471,6 +480,23 @@ async function runOnSelection(plan, replayDescriptor) {
     }
 
     const label = mode === "fill" ? "lassoDraw: 塗りつぶし" : "lassoDraw: 削除";
+
+    // 投げ縄が作った「選択範囲を設定」は、通知が届いた時点で既にヒストリーへ
+    // 確定している。suspendHistory はコールバック内しかまとめられないので、
+    // そのままでは Ctrl+Z が「塗りつぶし」と「選択範囲」の 2 回必要になる。
+    // 1 つ巻き戻してから選択範囲を作り直し、まとめて 1 ヒストリーにする。
+    let rewound = false;
+    if (settings.oneUndo) {
+      try {
+        await play("ヒストリーを 1 つ戻す", undoCommand());
+        rewound = true;
+      } catch (e) {
+        // 先行するヒストリーが無い場合など。まとめずに続行する。
+        console.warn("[lassoDraw] ヒストリーを戻せませんでした", errorMessage(e));
+      }
+    }
+
+    let deselected = false;
     let historyId = null;
     if (settings.oneUndo) {
       try {
@@ -484,8 +510,8 @@ async function runOnSelection(plan, replayDescriptor) {
     }
 
     try {
-      if (replayDescriptor) {
-        await play("選択範囲の再作成", replaySelectionCommand(replayDescriptor));
+      if (rewound || replayDescriptor) {
+        await play("選択範囲の再作成", replaySelectionCommand(descriptor));
       }
       try {
         await play(
@@ -498,9 +524,21 @@ async function runOnSelection(plan, replayDescriptor) {
         // 空の選択範囲・ロックされたレイヤーなど。選択解除だけは行う。
         commandError = e;
       }
+
+      // 境界線を描かないなら選択解除もこのグループに含める。
+      // 外に出すと選択解除が独立したヒストリーになり、取り消しが 2 手になる。
+      if (!settings.strokeBorder) {
+        try {
+          await play("選択解除", deselectCommand());
+          deselected = true;
+        } catch (e) {
+          if (!commandError) commandError = e;
+        }
+      }
     } finally {
-      // 境界線の描画はヒストリー抑制の外で行う。ブラシ系の操作が
-      // suspendHistory 中だと失敗する環境があるため。
+      // 境界線を描く前にヒストリー抑制を終える。
+      // 抑制スコープ内で ExtendScript のパス操作・ブラシ描画を行うと失敗するため。
+      // その代わり、境界線を描く設定では取り消しが 2 手になる。
       if (historyId !== null) {
         try {
           await context.hostControl.resumeHistory(historyId);
@@ -513,7 +551,6 @@ async function runOnSelection(plan, replayDescriptor) {
     // 境界線は「選択範囲 -> 作業用パス」に変換して描く。
     // 選択範囲が残っているとブラシが選択範囲でクリップされ、線の内側半分しか
     // 描かれないため、パスを作ってから選択解除し、その後で描画する。
-    let deselected = false;
     if (settings.strokeBorder) {
       try {
         // 削除モードでは消しゴムで境界線をなぞり、内側と挙動を揃える

@@ -37,8 +37,8 @@ Draw shape → it is painted. No `Alt+Backspace`, no `Ctrl+D`.
 
 ### As a plugin (.ccx)
 
-1. Download [`com.lassodraw.photoshop_PS.ccx`](com.lassodraw.photoshop_PS.ccx)
-   — the built package is committed to this repository
+1. Download `com.lassodraw.photoshop_PS.ccx` from this repository
+   — the built package is committed alongside the source
 2. Double-click it. The Creative Cloud desktop app installs the plugin.
 3. In Photoshop: **Plugins > lassoDraw**
 
@@ -74,7 +74,7 @@ Background layer.
 | **塗りつぶさずに選択範囲だけ残す / Selection only** | Paint nothing and keep the selection. See [below](#selection-only-mode). |
 | **削除モードの判定 / Delete-mode detection** | How the plugin decides you want to erase. Three methods, see [below](#delete-mode-detection). |
 | **投げ縄ツールのみ / Lasso tools only** | Turn off to also react to marquee, quick selection and magic wand. |
-| **1 ヒストリーにまとめる / Single history state** | Group fill and deselect into one undo step. |
+| **Ctrl+Z 一回で戻す / Single undo step** | Make one Ctrl+Z revert the whole operation, including the lasso selection itself. See [below](#one-step-undo). |
 
 Settings are stored in `settings.json` inside the plugin's data folder.
 
@@ -165,6 +165,23 @@ refused. ExtendScript's `PathItem.strokePath()` has no such restriction, so the 
 through the same bridge. There is no `batchPlay` fallback for this feature — it needs
 ExtendScript.
 
+### One-step undo
+
+By the time the notification arrives, Photoshop has already committed the lasso's own
+"Set Selection" history state. `suspendHistory` can only group what happens inside its
+callback, so undoing would take two presses: one for the fill, one for the selection.
+
+With **Ctrl+Z 一回で戻す** enabled, the plugin steps history back by one
+(`{_obj: "select", _target: [{_ref: "historyState", _offset: -1}]}`) to swallow that state,
+then recreates the selection from the shape carried in the notification descriptor — inside
+the suspended scope. Selection, fill and deselect collapse into a single entry.
+
+The outline is drawn *after* the suspended scope closes: ExtendScript path and brush
+operations fail while history is suspended. So with **Stroke border with brush** enabled,
+undo takes two steps rather than one.
+
+Turn it off if you would rather keep the selection as its own history step.
+
 ### Measuring what the brush covers
 
 There is no API that reports the footprint of a brush — softness, scattering and tip shape
@@ -202,28 +219,26 @@ Operations Photoshop would refuse are skipped up front, with the reason logged t
 
 Selection-only mode never touches the layer, so it works under any lock.
 
-## Building a `.ccx`
+## Packaging
 
-```powershell
-powershell -ExecutionPolicy Bypass -File package.ps1
-```
+Use the UXP Developer Tool's **Package** action and save the result to the repository root.
+It produces `<id>_PS.ccx`, which is the file users download — **repackage and commit it
+whenever the source changes**, or a stale build ships stale code.
 
-Writes `<id>_PS.ccx` at the repository root. **Rebuild and commit it whenever the source
-changes** — that file is what users download, so a stale one ships stale code.
+Hand-rolling the archive does not work in practice; package through the UXP Developer Tool.
 
-A `.ccx` is an unsigned ZIP with `manifest.json` at the root —
-the UXP Developer Tool's own `PluginPackageCommand` is just `archiver` with no signing step.
+A few notes on the format, in case packaging or installation fails:
 
-It does, however, validate the manifest first, and Creative Cloud fails installation with
-**error code -4** when those requirements are not met. `package.ps1` runs the same checks:
-
-- `version` in `x.y.z` form
-- `manifestVersion` ≥ 4
-- `host.minVersion` ≥ 22
-- an `icons` array at the top level
-- an `icons` array on every panel entrypoint
-
-Files included in the package are listed explicitly in `$include`, so add new ones there.
+- The archive is an unsigned ZIP with `manifest.json` at the root. UDT's
+  `PluginPackageCommand` collects files with `ignore-walk`, honouring `.gitignore`, and skips
+  dotfiles and existing `.ccx` files.
+- The manifest is validated first, and Creative Cloud refuses to install with
+  **error code -4** when the requirements are not met:
+  - `version` in `x.y.z` form
+  - `manifestVersion` ≥ 4
+  - `host.minVersion` ≥ 22
+  - an `icons` array at the top level
+  - an `icons` array on every panel entrypoint
 
 ## Layout
 
@@ -234,7 +249,7 @@ main.js                       event listening, batchPlay commands
 extendscript.js               ExtendScript bridge (key state, border stroke)
 icons/                        panel and plugin icons
 scripts/lassoDraw Toggle.jsx  shortcut helper, goes in Photoshop's Presets/Scripts
-package.ps1                   builds the .ccx
+docs/                         screenshots for this README
 ```
 
 ## License
