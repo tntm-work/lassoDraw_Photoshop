@@ -48,9 +48,10 @@ foreach ($rel in $include) {
     if (-not (Test-Path (Join-Path $root $rel))) { throw "見つかりません: $rel" }
 }
 
-$distDir = Join-Path $root 'dist'
-if (-not (Test-Path $distDir)) { New-Item -ItemType Directory -Path $distDir | Out-Null }
-$out = Join-Path $distDir $pkgName
+# 配布物はリポジトリ直下に置いてコミットする。
+# 利用者は Photoshop ユーザーであって開発者ではないので、
+# clone してビルドさせるのではなく .ccx をそのままダウンロードできるようにする。
+$out = Join-Path $root $pkgName
 if (Test-Path $out) { Remove-Item $out -Force }
 
 Add-Type -AssemblyName System.IO.Compression

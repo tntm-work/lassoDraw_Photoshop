@@ -7,6 +7,8 @@
 
 形を描く → 塗られる。`Alt+Backspace` も `Ctrl+D` も要りません。
 
+<img src="docs/panel.png" alt="lassoDraw パネル" width="240">
+
 ---
 
 ## 特徴
@@ -31,13 +33,14 @@
 
 ## インストール
 
-### パッケージから
+### プラグインとして使う（.ccx）
 
-1. [Releases](../../releases) から `com.lassodraw.photoshop_PS.ccx` をダウンロード
+1. [`com.lassodraw.photoshop_PS.ccx`](com.lassodraw.photoshop_PS.ccx) をダウンロード
+   — ビルド済みパッケージをリポジトリに同梱しています
 2. ダブルクリックすると Creative Cloud デスクトップアプリがインストールします
 3. Photoshop の **プラグイン > lassoDraw** から表示
 
-### ソースから
+### 開発する
 
 1. [UXP Developer Tool](https://developer.adobe.com/photoshop/uxp/2022/guides/devtool/) を用意
 2. `Add Plugin...` からこのリポジトリの `manifest.json` を選択
@@ -203,8 +206,12 @@ Photoshop が拒否する操作は事前にスキップし、理由をコンソ�
 powershell -ExecutionPolicy Bypass -File package.ps1
 ```
 
-`dist/<id>_PS.ccx` が生成されます。`.ccx` は `manifest.json` をルートに置いた**署名なしの
-ZIP** です（UXP Developer Tool の `PluginPackageCommand` も `archiver` で zip を作るだけで、
+リポジトリ直下に `<id>_PS.ccx` が生成されます。**ソースを変更したら必ず作り直して
+コミットしてください** — 利用者がダウンロードするのはこのファイルなので、
+古いままだと古いコードが配布されます。
+
+`.ccx` は `manifest.json` をルートに置いた**署名なしの ZIP** です
+（UXP Developer Tool の `PluginPackageCommand` も `archiver` で zip を作るだけで、
 署名処理はありません）。
 
 ただしパッケージ前に manifest の検証があり、これを満たさないと Creative Cloud の

@@ -7,6 +7,10 @@ then deselects. Hold **Ctrl** while releasing the mouse and it erases instead.
 
 Draw shape → it is painted. No `Alt+Backspace`, no `Ctrl+D`.
 
+<img src="docs/panel.png" alt="lassoDraw panel" width="240">
+
+*The panel UI is Japanese only.*
+
 ---
 
 ## Features
@@ -31,13 +35,14 @@ Draw shape → it is painted. No `Alt+Backspace`, no `Ctrl+D`.
 
 ## Install
 
-### From a package
+### As a plugin (.ccx)
 
-1. Download `com.lassodraw.photoshop_PS.ccx` from the [Releases](../../releases) page
+1. Download [`com.lassodraw.photoshop_PS.ccx`](com.lassodraw.photoshop_PS.ccx)
+   — the built package is committed to this repository
 2. Double-click it. The Creative Cloud desktop app installs the plugin.
 3. In Photoshop: **Plugins > lassoDraw**
 
-### From source
+### For development
 
 1. Install the [UXP Developer Tool](https://developer.adobe.com/photoshop/uxp/2022/guides/devtool/)
 2. `Add Plugin...` → select this repository's `manifest.json`
@@ -203,7 +208,10 @@ Selection-only mode never touches the layer, so it works under any lock.
 powershell -ExecutionPolicy Bypass -File package.ps1
 ```
 
-Produces `dist/<id>_PS.ccx`. A `.ccx` is an unsigned ZIP with `manifest.json` at the root —
+Writes `<id>_PS.ccx` at the repository root. **Rebuild and commit it whenever the source
+changes** — that file is what users download, so a stale one ships stale code.
+
+A `.ccx` is an unsigned ZIP with `manifest.json` at the root —
 the UXP Developer Tool's own `PluginPackageCommand` is just `archiver` with no signing step.
 
 It does, however, validate the manifest first, and Creative Cloud fails installation with
